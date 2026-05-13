@@ -1,0 +1,72 @@
+/*
+ * finding_registry.def
+ *
+ * Authoritative list of all v1 finding codes.
+ * Used by:
+ *   - make check-coverage  (verify test coverage)
+ *   - src/eval/findings.c  (finding metadata table via X-macro)
+ *   - docs/finding-registry.md (human reference)
+ *
+ * Format: X(ENUM_NAME, "STRING_ID")
+ *
+ * To add a finding:
+ *   1. Add entry here
+ *   2. Add test_<STRING_ID>_fires() and test_<STRING_ID>_no_fire()
+ *   3. Update docs/finding-registry.md
+ *   4. Add CHANGELOG entry
+ */
+
+/* ── TL-S: Schema and structural findings ──────────────────────────────── */
+X(TL_S001, "TL-S001")   /* TOKEN_ALG_NONE                   non-suppressible */
+X(TL_S002, "TL-S002")   /* POLICY_ALG_NONE                  non-suppressible */
+X(TL_S003, "TL-S003")   /* FIELD_VALUE_INVALID                               */
+X(TL_S004, "TL-S004")   /* ENVIRONMENT_INVALID                               */
+X(TL_S005, "TL-S005")   /* TOKEN_TYPE_EMPTY                                  */
+X(TL_S006, "TL-S006")   /* TOKEN_TYPE_UNSUPPORTED                            */
+X(TL_S007, "TL-S007")   /* TOKEN_TYPE_MULTIPLE                               */
+X(TL_S008, "TL-S008")   /* MODE_UNSUPPORTED                                  */
+X(TL_S009, "TL-S009")   /* FIELD_EMPTY                                       */
+X(TL_S010, "TL-S010")   /* ALG_UNRECOGNIZED                                  */
+X(TL_S011, "TL-S011")   /* JWKS_URL_SOURCE                                   */
+X(TL_S012, "TL-S012")   /* REGEX_INVALID                                     */
+X(TL_S013, "TL-S013")   /* CLAIM_RULE_CONFLICT                               */
+X(TL_S014, "TL-S014")   /* CLAIM_RULE_UNSATISFIABLE                          */
+X(TL_S015, "TL-S015")   /* CLAIM_RULE_MISSING_FIELD                          */
+X(TL_S020, "TL-S020")   /* SUPPRESSION_MISSING_REQUIRED_FIELD                */
+X(TL_S021, "TL-S021")   /* SUPPRESSION_UNKNOWN_FINDING_ID                    */
+X(TL_S022, "TL-S022")   /* SUPPRESSION_EXPIRED                               */
+X(TL_S023, "TL-S023")   /* SUPPRESSION_EXPIRING_SOON                         */
+X(TL_S024, "TL-S024")   /* SUPPRESSION_PROD_MISSING_EXPIRY                   */
+
+/* ── TL-A: Audit findings (policy-only) ────────────────────────────────── */
+X(TL_A002, "TL-A002")   /* ISSUER_HTTP_PROD                                  */
+X(TL_A003, "TL-A003")   /* ISSUER_LOCALHOST_PROD                             */
+X(TL_A004, "TL-A004")   /* AUDIENCE_WILDCARD                                 */
+X(TL_A005, "TL-A005")   /* POLICY_ALG_SYMMETRIC_PROD                         */
+X(TL_A007, "TL-A007")   /* TTL_UNBOUNDED                                     */
+X(TL_A014, "TL-A014")   /* REQUIRED_CLAIM_MISSING                            */
+
+/* ── TL-V: Token validation findings ───────────────────────────────────── */
+X(TL_V000, "TL-V000")   /* TOKEN_UNPARSEABLE                non-suppressible */
+X(TL_V001, "TL-V001")   /* TOKEN_ALG_ABSENT                 non-suppressible */
+X(TL_V002, "TL-V002")   /* TOKEN_ALG_UNRECOGNIZED           non-suppressible */
+X(TL_V003, "TL-V003")   /* TOKEN_ALG_NOT_ALLOWED                             */
+X(TL_V004, "TL-V004")   /* TOKEN_ALG_KEY_INCOMPATIBLE                        */
+X(TL_V005, "TL-V005")   /* TOKEN_ALG_KEY_ALG_CONFLICT                        */
+X(TL_V006, "TL-V006")   /* TOKEN_SIG_INVALID                non-suppressible */
+X(TL_V009, "TL-V009")   /* TOKEN_KID_ABSENT_STRICT                           */
+X(TL_V010, "TL-V010")   /* TOKEN_KID_NO_MATCH                                */
+X(TL_V011, "TL-V011")   /* TOKEN_SIG_UNVERIFIABLE                            */
+X(TL_V012, "TL-V012")   /* TOKEN_SIG_AMBIGUOUS                               */
+X(TL_V020, "TL-V020")   /* IAT_ABSENT_TTL_UNVERIFIABLE                       */
+X(TL_V021, "TL-V021")   /* EXP_ABSENT_TTL_UNVERIFIABLE                       */
+X(TL_V022, "TL-V022")   /* TOKEN_EXPIRED                    non-suppressible */
+X(TL_V023, "TL-V023")   /* TOKEN_NOT_YET_VALID                               */
+X(TL_V024, "TL-V024")   /* TOKEN_TTL_INVALID                non-suppressible */
+X(TL_V025, "TL-V025")   /* TOKEN_TTL_EXCEEDED                                */
+
+/* ── TL-C: Claim findings (presence check only in v1) ──────────────────── */
+X(TL_C001, "TL-C001")   /* CLAIM_ABSENT_REQUIRED                             */
+
+/* ── TL-I: Input and invocation errors ─────────────────────────────────── */
+X(TL_I001, "TL-I001")   /* AT_FLAG_INVALID                  non-suppressible */

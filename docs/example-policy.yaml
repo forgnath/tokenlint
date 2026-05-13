@@ -1,0 +1,65 @@
+# tokenlint validator policy — example
+# Schema: tokenlint.validator.v1
+#
+# This file describes what the payments-api service believes it enforces
+# about JWT trust. tokenlint audits this policy and validates tokens against it.
+
+schema_version: tokenlint.validator.v1
+
+validator:
+  id: payments-api
+  environment: prod
+
+accepts:
+  token_types:
+    - jwt
+
+  issuers:
+    mode: exact
+    values:
+      - https://auth.company.com
+
+  audiences:
+    mode: exact
+    values:
+      - payments-api
+
+  algorithms:
+    - RS256
+    - PS256
+
+jwks:
+  source: ./keys/prod.jwks.json
+  require_kid: true
+
+requires:
+  claims:
+    - iss
+    - sub
+    - aud
+    - exp
+    - iat
+
+limits:
+  max_ttl_seconds: 3600
+  max_clock_skew_seconds: 60
+
+claim_rules:
+  - claim: scope
+    operator: deny_any
+    required: true
+    type: string_list
+    normalize: space_delimited
+    values:
+      - "*"
+      - "admin:*"
+    description: "Reject wildcard and admin scopes"
+
+suppressions: []
+
+# Extension fields — not evaluated by tokenlint
+x_ownership:
+  team: platform-security
+  slack: "#platform-security"
+  reviewed: "2026-04-01"
+  next_review: "2026-10-01"

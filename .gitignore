@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+
+# Object files and libraries
+*.o
+*.a
+*.so
+
+# Vendor (committed separately, not tracked per-file)
+# vendor/ is committed — do not ignore
+
+# Editor artifacts
+*.swp
+*.swo
+.DS_Store
+.vscode/
+.idea/
+
+# Compile commands (generated)
+compile_commands.json
+
+# Fuzzing artifacts
+tests/fuzz/corpus/*/new/
+tests/fuzz/crashes/
