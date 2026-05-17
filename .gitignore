@@ -22,3 +22,11 @@ compile_commands.json
 # Fuzzing artifacts
 tests/fuzz/corpus/*/new/
 tests/fuzz/crashes/
+
+# compiled test binaries
+tests/unit/test_str
+tests/unit/test_arena
+build/
+
+# misc
+tree structure
