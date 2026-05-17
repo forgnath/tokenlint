@@ -13,6 +13,7 @@
  */
 
 #include "tokenlint.h"
+#include "str.h"
 
 #include <stdint.h>   /* uint64_t, int64_t, UINT64_MAX */
 #include <stddef.h>   /* size_t                        */
