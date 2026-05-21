@@ -32,7 +32,7 @@ is safe, self-consistent, and honored by real tokens.
 
 ## Status
 
-Full specification in `docs/`. Implementation in progress. include/tokenlint.h complete. Next: src/util/arena.c, src/util/str.c.
+Full specification in `docs/`. Implementation in progress. Layer 2 complete. Current Task: LAYER 3 — parse boundary
 
 ## Quick example
 
