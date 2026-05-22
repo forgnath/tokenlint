@@ -1,0 +1,23 @@
+validator:
+  id: test-api
+  environment: prod
+accepts:
+  token_types:
+    - jwt
+  issuers:
+    mode: exact
+    values:
+      - https://auth.example.com
+  audiences:
+    mode: exact
+    values:
+      - test-api
+  algorithms:
+    - RS256
+jwks:
+  source: ./keys.json
+requires:
+  claims:
+    - iss
+    - aud
+    - exp

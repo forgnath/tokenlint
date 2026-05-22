@@ -1,0 +1,10 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "n": "sIwr2M7C7L2M7C7L2M",
+      "e": "AQAB"
+    }
+  ]
+}

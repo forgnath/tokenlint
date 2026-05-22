@@ -1,0 +1,11 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "key_ops": ["verify"],
+      "kid": "rsa-ops-1",
+      "n": "sIwr2M7C7L2M7C7L2M",
+      "e": "AQAB"
+    }
+  ]
+}

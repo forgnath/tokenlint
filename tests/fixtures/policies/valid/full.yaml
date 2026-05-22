@@ -1,0 +1,44 @@
+schema_version: tokenlint.validator.v1
+validator:
+  id: payments-api
+  environment: stage
+accepts:
+  token_types:
+    - jwt
+  issuers:
+    mode: exact
+    values:
+      - https://auth.example.com
+      - https://auth2.example.com
+  audiences:
+    mode: exact
+    values:
+      - payments-api
+  algorithms:
+    - RS256
+    - PS256
+    - ES256
+jwks:
+  source: ./keys.json
+  require_kid: false
+requires:
+  claims:
+    - iss
+    - sub
+    - aud
+    - exp
+    - iat
+    - jti
+limits:
+  max_ttl_seconds: 1800
+  max_clock_skew_seconds: 30
+claim_rules:
+  - claim: scope
+    operator: deny_any
+    required: true
+    values:
+      - "*"
+      - "admin:*"
+suppressions: []
+x_company:
+  owner: platform-security

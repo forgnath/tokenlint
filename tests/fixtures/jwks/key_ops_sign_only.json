@@ -1,0 +1,11 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "key_ops": ["sign"],
+      "kid": "rsa-sign-only",
+      "n": "sIwr2M7C7L2M7C7L2M",
+      "e": "AQAB"
+    }
+  ]
+}
