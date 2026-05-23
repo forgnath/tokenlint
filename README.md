@@ -32,7 +32,7 @@ is safe, self-consistent, and honored by real tokens.
 
 ## Status
 
-Full specification in `docs/`. Implementation in progress. Layer 2 complete. Current Task: LAYER 3 — parse boundary
+Full specification in `docs/`. Implementation in progress. Layer 1-3 complete. 
 
 ## Quick example
 
