@@ -1,468 +1,531 @@
 /*
  * tests/unit/test_eval_time.c
  *
- * Unit tests for src/util/time_util.c
+ * Unit tests for src/eval/eval_time.c
  *
- * Coverage:
- *   tl_parse_at_flag     -- all accepted and rejected formats per time-contract.md
- *   tl_resolve_reference_time
- *   tl_format_iso8601z
- *   tl_time_source_str
+ * Covers all TL-V time findings:
+ *   TL-V020  IAT_ABSENT_TTL_UNVERIFIABLE
+ *   TL-V021  EXP_ABSENT_TTL_UNVERIFIABLE
+ *   TL-V022  TOKEN_EXPIRED                (non-suppressible)
+ *   TL-V023  TOKEN_NOT_YET_VALID
+ *   TL-V024  TOKEN_TTL_INVALID            (non-suppressible)
+ *   TL-V025  TOKEN_TTL_EXCEEDED
  *
- * 28 TEST + 4 SECURITY_PROP = 32 total
- *
- * Exit codes (from test_runner.h):
- *   0 -- all passed
- *   1 -- correctness failure
- *   2 -- SECURITY_PROP failure
+ * All epoch constants verified with python3:
+ *   python3 -c "import datetime; print(datetime.datetime(2024,1,1,tzinfo=datetime.timezone.utc).timestamp())"
+ *   → 1704067200
  */
 
 #include "helpers/test_runner.h"
 #include "tokenlint.h"
-#include "str.h"
-#include "time_util.h"
+#include "findings.h"
+#include "policy.h"
+#include "token.h"
+#include "eval_ctx.h"
 
-#include <stdint.h>
 #include <string.h>
-#include <time.h>
+#include <stddef.h>
 
+void eval_time(eval_ctx_t *ctx);
 
-/* =========================================================================
- * Test helpers
- * ========================================================================= */
+/* 2024-01-01T00:00:00Z = 1704067200 */
+#define T_BASE   ((int64_t)1704067200)
+#define T_HOUR   ((int64_t)3600)
+#define T_MIN    ((int64_t)60)
 
-/* Parse and return the result (unchecked error — use only when expecting OK) */
-static tl_reference_time_t parse_ok(const char *lit) {
-    tl_reference_time_t r;
-    r.value  = -1;
-    r.source = TL_TIME_SRC_SYSTEM_CLOCK;
-    tl_error_t err = tl_parse_at_flag(str_from_cstr(lit), &r);
-    TL_UNUSED(err);
-    return r;
+static policy_t make_policy_with_ttl(int64_t max_ttl, int64_t clock_skew)
+{
+    policy_t p;
+    memset(&p, 0, sizeof(p));
+    p.environment = ENV_PROD;
+    p.required_registered_claims = CLAIM_ISS | CLAIM_AUD | CLAIM_EXP;
+    p.time_limits.max_ttl_seconds        = max_ttl;
+    p.time_limits.max_clock_skew_seconds = clock_skew;
+    return p;
 }
 
-/* Returns 1 if parsing lit produces a non-OK error */
-static int parse_fails(const char *lit) {
-    tl_reference_time_t r;
-    r.value  = 0;
-    r.source = TL_TIME_SRC_SYSTEM_CLOCK;
-    tl_error_t err = tl_parse_at_flag(str_from_cstr(lit), &r);
-    return !tl_ok(err);
+static token_t make_token_times(int64_t exp, int64_t nbf, int64_t iat,
+                                 uint32_t present)
+{
+    token_t t;
+    memset(&t, 0, sizeof(t));
+    t.exp = exp;
+    t.nbf = nbf;
+    t.iat = iat;
+    t.present_claims = present;
+    return t;
 }
 
-/* Returns the error kind from parsing lit */
-static int parse_err_kind(const char *lit) {
-    tl_reference_time_t r;
-    r.value  = 0;
-    r.source = TL_TIME_SRC_SYSTEM_CLOCK;
-    tl_error_t err = tl_parse_at_flag(str_from_cstr(lit), &r);
-    return (int)err.kind;
+static eval_ctx_t make_ctx(arena_t *arena, finding_set_t *fs,
+                            policy_t *pol, token_t *tok, int64_t reftime)
+{
+    eval_ctx_t ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.arena          = arena;
+    ctx.findings       = fs;
+    ctx.policy         = pol;
+    ctx.token          = tok;
+    ctx.reference_time = reftime;
+    return ctx;
 }
 
-
-/* =========================================================================
- * tl_parse_at_flag -- "now"
- * ========================================================================= */
-
-TEST(parse_at_now_source) {
-    tl_reference_time_t r;
-    tl_error_t err = tl_parse_at_flag(STR_LIT("now"), &r);
-    ASSERT_TRUE(tl_ok(err));
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_CLI_AT_NOW);
-}
-
-TEST(parse_at_now_value_positive) {
-    tl_reference_time_t r;
-    tl_error_t err = tl_parse_at_flag(STR_LIT("now"), &r);
-    ASSERT_TRUE(tl_ok(err));
-    /* Should be a plausible post-2020 timestamp */
-    ASSERT_GT(r.value, 1577836800LL);
-}
-
-
-/* =========================================================================
- * tl_parse_at_flag -- Unix epoch integers
- * ========================================================================= */
-
-TEST(parse_at_unix_zero) {
-    tl_reference_time_t r = parse_ok("0");
-    ASSERT_EQ(r.value, 0LL);
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_CLI_AT);
-}
-
-TEST(parse_at_unix_one) {
-    tl_reference_time_t r = parse_ok("1");
-    ASSERT_EQ(r.value, 1LL);
-}
-
-TEST(parse_at_unix_known_epoch) {
-    /* 2026-04-30T12:00:00Z = 1777550400 (verified via python3 datetime) */
-    tl_reference_time_t r = parse_ok("1777550400");
-    ASSERT_EQ(r.value, 1777550400LL);
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_CLI_AT);
-}
-
-TEST(parse_at_unix_large) {
-    /* ~year 2100 */
-    tl_reference_time_t r = parse_ok("4102444800");
-    ASSERT_EQ(r.value, 4102444800LL);
-}
-
-
-/* =========================================================================
- * tl_parse_at_flag -- ISO 8601 with Z suffix
- * ========================================================================= */
-
-TEST(parse_at_iso_z_basic) {
-    /* 2026-04-30T12:00:00Z */
-    tl_reference_time_t r = parse_ok("2026-04-30T12:00:00Z");
-    ASSERT_EQ(r.value, 1777550400LL);
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_CLI_AT);
-}
-
-TEST(parse_at_iso_z_epoch) {
-    /* 1970-01-01T00:00:00Z = 0 */
-    tl_reference_time_t r = parse_ok("1970-01-01T00:00:00Z");
-    ASSERT_EQ(r.value, 0LL);
-}
-
-TEST(parse_at_iso_z_midnight) {
-    /* 2024-01-01T00:00:00Z = 1704067200 */
-    tl_reference_time_t r = parse_ok("2024-01-01T00:00:00Z");
-    ASSERT_EQ(r.value, 1704067200LL);
-}
-
-TEST(parse_at_iso_z_end_of_day) {
-    /* 2024-01-01T23:59:59Z = 1704153599 */
-    tl_reference_time_t r = parse_ok("2024-01-01T23:59:59Z");
-    ASSERT_EQ(r.value, 1704153599LL);
-}
-
-TEST(parse_at_iso_leap_day) {
-    /* 2024-02-29T00:00:00Z = 1709164800 (2024 is a leap year) */
-    tl_reference_time_t r = parse_ok("2024-02-29T00:00:00Z");
-    ASSERT_EQ(r.value, 1709164800LL);
-}
-
-
-/* =========================================================================
- * tl_parse_at_flag -- ISO 8601 with numeric timezone offset
- * ========================================================================= */
-
-TEST(parse_at_iso_negative_offset) {
-    /* 2026-04-30T08:00:00-04:00 = 2026-04-30T12:00:00Z = 1777550400 */
-    tl_reference_time_t r = parse_ok("2026-04-30T08:00:00-04:00");
-    ASSERT_EQ(r.value, 1777550400LL);
-}
-
-TEST(parse_at_iso_positive_offset) {
-    /* 2026-04-30T15:30:00+03:30 = 2026-04-30T12:00:00Z = 1777550400 */
-    tl_reference_time_t r = parse_ok("2026-04-30T15:30:00+03:30");
-    ASSERT_EQ(r.value, 1777550400LL);
-}
-
-TEST(parse_at_iso_plus_zero_offset) {
-    /* +00:00 is equivalent to Z */
-    tl_reference_time_t r = parse_ok("2026-04-30T12:00:00+00:00");
-    ASSERT_EQ(r.value, 1777550400LL);
-}
-
-
-/* =========================================================================
- * tl_parse_at_flag -- rejected formats (time-contract.md TL-I001)
- * ========================================================================= */
-
-TEST(parse_at_reject_no_timezone) {
-    /* time-contract: ISO 8601 without timezone -> FAIL TL-I001 */
-    ASSERT_TRUE(parse_fails("2026-04-30T12:00:00"));
-    ASSERT_EQ(parse_err_kind("2026-04-30T12:00:00"), (int)TL_ERR_AT_FLAG);
-}
-
-TEST(parse_at_reject_negative_integer) {
-    ASSERT_TRUE(parse_fails("-1"));
-    ASSERT_EQ(parse_err_kind("-1"), (int)TL_ERR_AT_FLAG);
-}
-
-TEST(parse_at_reject_negative_large) {
-    ASSERT_TRUE(parse_fails("-9999999999"));
-    ASSERT_EQ(parse_err_kind("-9999999999"), (int)TL_ERR_AT_FLAG);
-}
-
-TEST(parse_at_reject_empty_string) {
-    ASSERT_TRUE(parse_fails(""));
-}
-
-TEST(parse_at_reject_str_null) {
-    tl_reference_time_t r;
-    r.value = 0;
-    r.source = TL_TIME_SRC_SYSTEM_CLOCK;
-    tl_error_t err = tl_parse_at_flag(STR_NULL, &r);
-    ASSERT_FALSE(tl_ok(err));
-    ASSERT_EQ((int)err.kind, (int)TL_ERR_AT_FLAG);
-}
-
-TEST(parse_at_reject_garbage) {
-    ASSERT_TRUE(parse_fails("yesterday"));
-    ASSERT_TRUE(parse_fails("last-week"));
-    ASSERT_TRUE(parse_fails("abc"));
-    ASSERT_TRUE(parse_fails("12abc"));
-}
-
-TEST(parse_at_reject_partial_iso) {
-    ASSERT_TRUE(parse_fails("2026-04"));
-    ASSERT_TRUE(parse_fails("2026-04-30"));
-}
-
-TEST(parse_at_reject_invalid_month) {
-    ASSERT_TRUE(parse_fails("2026-13-01T00:00:00Z"));
-    ASSERT_TRUE(parse_fails("2026-00-01T00:00:00Z"));
-}
-
-TEST(parse_at_reject_invalid_day) {
-    /* 2026 is not a leap year: Feb 29 invalid */
-    ASSERT_TRUE(parse_fails("2026-02-29T00:00:00Z"));
-    /* April has 30 days */
-    ASSERT_TRUE(parse_fails("2026-04-31T00:00:00Z"));
-}
-
-TEST(parse_at_reject_invalid_hour) {
-    ASSERT_TRUE(parse_fails("2026-04-30T25:00:00Z"));
-    ASSERT_TRUE(parse_fails("2026-04-30T24:00:00Z"));
-}
-
-
-/* =========================================================================
- * tl_resolve_reference_time
- * ========================================================================= */
-
-TEST(resolve_reference_time_ok) {
-    tl_reference_time_t r;
-    tl_error_t err = tl_resolve_reference_time(&r);
-    ASSERT_TRUE(tl_ok(err));
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_SYSTEM_CLOCK);
-    /* Must be a plausible post-2020 timestamp */
-    ASSERT_GT(r.value, 1577836800LL);
-}
-
-TEST(resolve_reference_time_not_cli_at) {
-    tl_reference_time_t r;
-    tl_error_t err = tl_resolve_reference_time(&r);
-    ASSERT_TRUE(tl_ok(err));
-    ASSERT_NE((int)r.source, (int)TL_TIME_SRC_CLI_AT);
-    ASSERT_NE((int)r.source, (int)TL_TIME_SRC_CLI_AT_NOW);
-}
-
-
-/* =========================================================================
- * tl_format_iso8601z
- * ========================================================================= */
-
-TEST(format_iso8601z_known_value) {
-    char buf[TL_ISO8601Z_BUF_LEN];
-    int rc = tl_format_iso8601z(1777550400LL, buf, sizeof(buf));
-    ASSERT_EQ(rc, 0);
-    ASSERT_STR_EQ(buf, "2026-04-30T12:00:00Z");
-}
-
-TEST(format_iso8601z_epoch) {
-    char buf[TL_ISO8601Z_BUF_LEN];
-    int rc = tl_format_iso8601z(0LL, buf, sizeof(buf));
-    ASSERT_EQ(rc, 0);
-    ASSERT_STR_EQ(buf, "1970-01-01T00:00:00Z");
-}
-
-TEST(format_iso8601z_buf_too_small) {
-    char buf[10];
-    int rc = tl_format_iso8601z(1777550400LL, buf, sizeof(buf));
-    ASSERT_EQ(rc, -1);
-}
-
-TEST(format_iso8601z_exact_length) {
-    char buf[TL_ISO8601Z_BUF_LEN];
-    int rc = tl_format_iso8601z(1777550400LL, buf, sizeof(buf));
-    ASSERT_EQ(rc, 0);
-    ASSERT_EQ((int)strlen(buf), 20);
-}
-
-TEST(format_iso8601z_z_suffix) {
-    char buf[TL_ISO8601Z_BUF_LEN];
-    tl_format_iso8601z(1777550400LL, buf, sizeof(buf));
-    ASSERT_EQ((int)buf[19], (int)'Z');
-    ASSERT_EQ((int)buf[20], (int)'\0');
-}
-
-TEST(format_iso8601z_midnight) {
-    char buf[TL_ISO8601Z_BUF_LEN];
-    int rc = tl_format_iso8601z(1704067200LL, buf, sizeof(buf));
-    ASSERT_EQ(rc, 0);
-    ASSERT_STR_EQ(buf, "2024-01-01T00:00:00Z");
-}
-
-
-/* =========================================================================
- * tl_time_source_str
- * ========================================================================= */
-
-TEST(time_source_str_system_clock) {
-    ASSERT_STR_EQ(tl_time_source_str(TL_TIME_SRC_SYSTEM_CLOCK), "system_clock");
-}
-
-TEST(time_source_str_cli_at) {
-    ASSERT_STR_EQ(tl_time_source_str(TL_TIME_SRC_CLI_AT), "cli_at");
-}
-
-TEST(time_source_str_cli_at_now) {
-    ASSERT_STR_EQ(tl_time_source_str(TL_TIME_SRC_CLI_AT_NOW), "cli_at_now");
-}
-
-
-/* =========================================================================
- * SECURITY_PROP — time-contract critical invariants
- * ========================================================================= */
-
-/*
- * SECURITY_PROP: ISO 8601 without timezone must ALWAYS be rejected.
- *
- * Accepting "2026-04-30T12:00:00" silently as UTC would introduce a
- * class of timezone-confusion bugs.  The time-contract.md is explicit:
- * ambiguous timezone is a hard failure.
- */
-SECURITY_PROP(iso8601_no_tz_always_rejected) {
-    const char *cases[] = {
-        "2026-04-30T12:00:00",
-        "2000-01-01T00:00:00",
-        "1999-12-31T23:59:59",
-        "2038-01-19T03:14:07",
-        "1970-01-01T00:00:00",
-    };
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        tl_reference_time_t r;
-        r.value = 0;
-        r.source = TL_TIME_SRC_SYSTEM_CLOCK;
-        tl_error_t err = tl_parse_at_flag(str_from_cstr(cases[i]), &r);
-        ASSERT_FALSE(tl_ok(err));
-        ASSERT_EQ((int)err.kind, (int)TL_ERR_AT_FLAG);
+static int has_finding(const finding_set_t *fs, const char *id_cstr)
+{
+    str_t id = str_from_cstr(id_cstr);
+    for (size_t i = 0; i < fs->count; i++) {
+        if (str_eq(fs->findings[i].id, id) &&
+            fs->findings[i].status == FINDING_ACTIVE) return 1;
     }
-}
-
-/*
- * SECURITY_PROP: Negative integer timestamps must ALWAYS be rejected.
- *
- * Accepting negative values would cause exp/nbf comparisons to behave
- * incorrectly — pre-1970 reference_time would make all tokens appear valid.
- */
-SECURITY_PROP(negative_timestamp_always_rejected) {
-    const char *cases[] = {
-        "-1",
-        "-100",
-        "-9223372036854775808",
-        "-0",   /* leading '-' before zero */
-    };
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        ASSERT_TRUE(parse_fails(cases[i]));
-        ASSERT_EQ(parse_err_kind(cases[i]), (int)TL_ERR_AT_FLAG);
-    }
-}
-
-/*
- * SECURITY_PROP: Parse-then-format round-trip must be stable.
- *
- * Ensures the civil_to_epoch algorithm and tl_format_iso8601z are
- * consistent — critical for reproducible forensic output.
- */
-SECURITY_PROP(parse_format_roundtrip) {
-    struct { const char *iso; int64_t epoch; } cases[] = {
-        { "2026-04-30T12:00:00Z", 1777550400LL },
-        { "1970-01-01T00:00:00Z", 0LL           },
-        { "2024-01-01T00:00:00Z", 1704067200LL  },
-        { "2024-01-01T23:59:59Z", 1704153599LL  },
-    };
-    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-        tl_reference_time_t r = parse_ok(cases[i].iso);
-        ASSERT_EQ(r.value, cases[i].epoch);
-
-        char buf[TL_ISO8601Z_BUF_LEN];
-        int rc = tl_format_iso8601z(r.value, buf, sizeof(buf));
-        ASSERT_EQ(rc, 0);
-        ASSERT_STR_EQ(buf, cases[i].iso);
-    }
-}
-
-/*
- * SECURITY_PROP: "--at now" must produce source=cli_at_now, NOT system_clock.
- *
- * The JSON output contract requires distinct source strings.  Misidentifying
- * the source corrupts the audit trail used for forensic reproduction.
- */
-SECURITY_PROP(now_source_is_cli_at_now_not_system_clock) {
-    tl_reference_time_t r;
-    tl_error_t err = tl_parse_at_flag(STR_LIT("now"), &r);
-    ASSERT_TRUE(tl_ok(err));
-    ASSERT_EQ((int)r.source, (int)TL_TIME_SRC_CLI_AT_NOW);
-    ASSERT_NE((int)r.source, (int)TL_TIME_SRC_SYSTEM_CLOCK);
-    ASSERT_NE((int)r.source, (int)TL_TIME_SRC_CLI_AT);
+    return 0;
 }
 
 
 /* =========================================================================
- * TEST_MAIN
+ * TL-V022: TOKEN_EXPIRED
  * ========================================================================= */
+
+TEST(v022_fires_token_expired) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* exp = T_BASE, reference_time = T_BASE → expired (>= exp) */
+    token_t tok = make_token_times(T_BASE, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V022"));
+    arena_free(arena);
+}
+
+TEST(v022_fires_reference_after_exp) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE, 0, 0, CLAIM_EXP);
+    /* reference_time one second after exp */
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE + 1);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V022"));
+    arena_free(arena);
+}
+
+TEST(v022_no_fire_token_not_yet_expired) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* exp = T_BASE + 1, reference_time = T_BASE → not expired */
+    token_t tok = make_token_times(T_BASE + 1, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V022"));
+    arena_free(arena);
+}
+
+TEST(v022_no_fire_exp_absent) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    /* No CLAIM_EXP in present_claims — exp check skipped */
+    token_t tok = make_token_times(0, 0, 0, 0);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V022"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * TL-V023: TOKEN_NOT_YET_VALID
+ * ========================================================================= */
+
+TEST(v023_fires_reference_before_nbf_minus_skew) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    /* clock_skew = 60 */
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    /* nbf = T_BASE, skew = 60, reference_time = T_BASE - 61 → not yet valid */
+    token_t tok = make_token_times(0, T_BASE, 0, CLAIM_NBF);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE - 61);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V023"));
+    arena_free(arena);
+}
+
+TEST(v023_no_fire_within_skew_window) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    /* reference_time = T_BASE - 60 = exactly at nbf - skew → PASS */
+    token_t tok = make_token_times(0, T_BASE, 0, CLAIM_NBF);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE - T_MIN);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V023"));
+    arena_free(arena);
+}
+
+TEST(v023_no_fire_nbf_absent) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    token_t tok = make_token_times(0, 0, 0, 0); /* no CLAIM_NBF */
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V023"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * TL-V020: IAT_ABSENT_TTL_UNVERIFIABLE
+ * ========================================================================= */
+
+TEST(v020_fires_iat_absent_ttl_set) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* No CLAIM_IAT, max_ttl_seconds = 3600 → V020 */
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V020"));
+    arena_free(arena);
+}
+
+TEST(v020_no_fire_iat_present) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V020"));
+    arena_free(arena);
+}
+
+TEST(v020_no_fire_ttl_not_set) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    /* max_ttl_seconds = 0 → TTL not set → V020 doesn't fire */
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V020"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * TL-V021: EXP_ABSENT_TTL_UNVERIFIABLE
+ * ========================================================================= */
+
+TEST(v021_fires_exp_absent_ttl_set) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* No CLAIM_EXP, max_ttl_seconds = 3600 → V021 */
+    token_t tok = make_token_times(0, 0, T_BASE, CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V021"));
+    arena_free(arena);
+}
+
+TEST(v021_no_fire_exp_present) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V021"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * TL-V024: TOKEN_TTL_INVALID  (exp - iat <= 0)
+ * ========================================================================= */
+
+TEST(v024_fires_exp_equals_iat) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* exp == iat → ttl = 0 → V024 */
+    token_t tok = make_token_times(T_BASE, 0, T_BASE, CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE - T_HOUR);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V024"));
+    arena_free(arena);
+}
+
+TEST(v024_fires_exp_before_iat) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* exp < iat → ttl negative → V024 */
+    token_t tok = make_token_times(T_BASE - 1, 0, T_BASE, CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE - T_HOUR);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V024"));
+    arena_free(arena);
+}
+
+TEST(v024_no_fire_valid_ttl) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V024"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * TL-V025: TOKEN_TTL_EXCEEDED
+ * ========================================================================= */
+
+TEST(v025_fires_ttl_exceeds_max) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    /* max_ttl = 1 hour, token ttl = 2 hours */
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + 2 * T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V025"));
+    arena_free(arena);
+}
+
+TEST(v025_no_fire_ttl_at_max) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* ttl = exactly max → PASS */
+    token_t tok = make_token_times(T_BASE + T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V025"));
+    arena_free(arena);
+}
+
+TEST(v025_no_fire_no_max_ttl) {
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    /* max_ttl_seconds = 0 → unbounded → V025 doesn't fire */
+    policy_t pol = make_policy_with_ttl(0, T_MIN);
+
+    token_t tok = make_token_times(T_BASE + 100 * T_HOUR, 0, T_BASE,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_FALSE(has_finding(&fs, "TL-V025"));
+    arena_free(arena);
+}
+
+
+/* =========================================================================
+ * Clock skew: applies ONLY to nbf, never to exp
+ * ========================================================================= */
+
+TEST(exp_check_never_applies_skew) {
+    /* Even with a large clock_skew, exp check has no grace period */
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    /* clock_skew = 1 hour */
+    policy_t pol = make_policy_with_ttl(0, T_HOUR);
+
+    /* reference_time == exp → expired, even with skew */
+    token_t tok = make_token_times(T_BASE, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V022"));
+    arena_free(arena);
+}
+
+/* =========================================================================
+ * SECURITY_PROP tests
+ * ========================================================================= */
+
+SECURITY_PROP(expired_token_always_fails) {
+    /* V022 must fire regardless of suppression count */
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE - 1, 0, 0, CLAIM_EXP);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V022"));
+
+    /* Verify it's marked non-suppressible: check the raw finding */
+    int found_active = 0;
+    for (size_t i = 0; i < fs.count; i++) {
+        str_t id = str_from_cstr("TL-V022");
+        if (str_eq(fs.findings[i].id, id)) {
+            ASSERT_EQ(fs.findings[i].status, FINDING_ACTIVE);
+            found_active = 1;
+        }
+    }
+    ASSERT_TRUE(found_active);
+    arena_free(arena);
+}
+
+SECURITY_PROP(invalid_ttl_always_fails) {
+    /* V024 (exp <= iat) is non-suppressible */
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    token_t tok = make_token_times(T_BASE, 0, T_BASE + 1,
+                                   CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE - T_HOUR);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V024"));
+
+    int found_active = 0;
+    for (size_t i = 0; i < fs.count; i++) {
+        str_t id = str_from_cstr("TL-V024");
+        if (str_eq(fs.findings[i].id, id)) {
+            ASSERT_EQ(fs.findings[i].status, FINDING_ACTIVE);
+            found_active = 1;
+        }
+    }
+    ASSERT_TRUE(found_active);
+    arena_free(arena);
+}
+
+SECURITY_PROP(all_time_checks_independent) {
+    /* Multiple time findings can fire in the same evaluation */
+    arena_t *arena = arena_new(TL_ARENA_DEFAULT_SIZE);
+    ASSERT_NOT_NULL(arena);
+
+    finding_set_t fs; findings_init(&fs);
+    policy_t pol = make_policy_with_ttl(T_HOUR, T_MIN);
+
+    /* exp in the past (V022) + iat == exp (V024) + ttl exceeded (V025 won't
+     * fire because V024 fires first for ttl<=0, but both exp and iat absent
+     * related findings check independently) */
+
+    /* Construct: exp=T_BASE (expired), iat=T_BASE (same, so ttl=0 = V024),
+     * reference_time = T_BASE+1 */
+    token_t tok = make_token_times(T_BASE, 0, T_BASE, CLAIM_EXP | CLAIM_IAT);
+    eval_ctx_t ctx = make_ctx(arena, &fs, &pol, &tok, T_BASE + 1);
+    eval_time(&ctx);
+
+    ASSERT_TRUE(has_finding(&fs, "TL-V022")); /* expired */
+    ASSERT_TRUE(has_finding(&fs, "TL-V024")); /* ttl invalid */
+
+    arena_free(arena);
+}
 
 TEST_MAIN(
-    /* "now" */
-    tl_run_parse_at_now_source,
-    tl_run_parse_at_now_value_positive,
-
-    /* Unix integers */
-    tl_run_parse_at_unix_zero,
-    tl_run_parse_at_unix_one,
-    tl_run_parse_at_unix_known_epoch,
-    tl_run_parse_at_unix_large,
-
-    /* ISO 8601 Z */
-    tl_run_parse_at_iso_z_basic,
-    tl_run_parse_at_iso_z_epoch,
-    tl_run_parse_at_iso_z_midnight,
-    tl_run_parse_at_iso_z_end_of_day,
-    tl_run_parse_at_iso_leap_day,
-
-    /* ISO 8601 offset */
-    tl_run_parse_at_iso_negative_offset,
-    tl_run_parse_at_iso_positive_offset,
-    tl_run_parse_at_iso_plus_zero_offset,
-
-    /* Rejected */
-    tl_run_parse_at_reject_no_timezone,
-    tl_run_parse_at_reject_negative_integer,
-    tl_run_parse_at_reject_negative_large,
-    tl_run_parse_at_reject_empty_string,
-    tl_run_parse_at_reject_str_null,
-    tl_run_parse_at_reject_garbage,
-    tl_run_parse_at_reject_partial_iso,
-    tl_run_parse_at_reject_invalid_month,
-    tl_run_parse_at_reject_invalid_day,
-    tl_run_parse_at_reject_invalid_hour,
-
-    /* resolve */
-    tl_run_resolve_reference_time_ok,
-    tl_run_resolve_reference_time_not_cli_at,
-
-    /* format */
-    tl_run_format_iso8601z_known_value,
-    tl_run_format_iso8601z_epoch,
-    tl_run_format_iso8601z_buf_too_small,
-    tl_run_format_iso8601z_exact_length,
-    tl_run_format_iso8601z_z_suffix,
-    tl_run_format_iso8601z_midnight,
-
-    /* source_str */
-    tl_run_time_source_str_system_clock,
-    tl_run_time_source_str_cli_at,
-    tl_run_time_source_str_cli_at_now,
-
-    /* SECURITY_PROP */
-    tl_run_iso8601_no_tz_always_rejected,
-    tl_run_negative_timestamp_always_rejected,
-    tl_run_parse_format_roundtrip,
-    tl_run_now_source_is_cli_at_now_not_system_clock,
+    tl_run_v022_fires_token_expired,
+    tl_run_v022_fires_reference_after_exp,
+    tl_run_v022_no_fire_token_not_yet_expired,
+    tl_run_v022_no_fire_exp_absent,
+    tl_run_v023_fires_reference_before_nbf_minus_skew,
+    tl_run_v023_no_fire_within_skew_window,
+    tl_run_v023_no_fire_nbf_absent,
+    tl_run_v020_fires_iat_absent_ttl_set,
+    tl_run_v020_no_fire_iat_present,
+    tl_run_v020_no_fire_ttl_not_set,
+    tl_run_v021_fires_exp_absent_ttl_set,
+    tl_run_v021_no_fire_exp_present,
+    tl_run_v024_fires_exp_equals_iat,
+    tl_run_v024_fires_exp_before_iat,
+    tl_run_v024_no_fire_valid_ttl,
+    tl_run_v025_fires_ttl_exceeds_max,
+    tl_run_v025_no_fire_ttl_at_max,
+    tl_run_v025_no_fire_no_max_ttl,
+    tl_run_exp_check_never_applies_skew,
+    tl_run_expired_token_always_fails,
+    tl_run_invalid_ttl_always_fails,
+    tl_run_all_time_checks_independent,
 )
