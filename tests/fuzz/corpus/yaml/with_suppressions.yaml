@@ -1,0 +1,35 @@
+schema_version: tokenlint.validator.v1
+validator:
+  id: payments-api
+  environment: prod
+accepts:
+  token_types:
+    - jwt
+  issuers:
+    mode: exact
+    values:
+      - https://auth.example.com
+  audiences:
+    mode: exact
+    values:
+      - payments-api
+  algorithms:
+    - RS256
+jwks:
+  source: ./keys.json
+requires:
+  claims:
+    - iss
+    - sub
+    - aud
+    - exp
+    - iat
+limits:
+  max_ttl_seconds: 3600
+  max_clock_skew_seconds: 60
+suppressions:
+  - id: TL-A007
+    reason: TTL enforcement migration in progress
+    owner: platform-security
+    ticket: SEC-9999
+    expires: "2027-01-01"

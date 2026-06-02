@@ -1,0 +1,27 @@
+schema_version: tokenlint.validator.v1
+validator:
+  id: test
+  environment: dev
+accepts:
+  token_types:
+    - jwt
+  issuers:
+    mode: exact
+    values:
+      - https://auth-dev.example.com
+  audiences:
+    mode: exact
+    values:
+      - api-dev
+  algorithms:
+    - RS256
+    - HS256
+jwks:
+  source: ./keys.json
+requires:
+  claims:
+    - iss
+    - aud
+    - exp
+limits:
+  max_ttl_seconds: 86400
