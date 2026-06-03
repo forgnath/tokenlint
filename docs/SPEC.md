@@ -1,7 +1,7 @@
 # tokenlint — Master Specification
 
-Version: 0.1.0  
-Status: Pre-implementation  
+Version: 1.0.0  
+Status: Released  
 Schema: tokenlint.validator.v1
 
 ---
