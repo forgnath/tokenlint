@@ -9,7 +9,7 @@ Status values: planned | in-progress | released
 
 ## Roadmap summary
 
-### v1.0.0 — in-progress
+### v1.0.0 — 2026-06-02 — released
 
 The narrow, precise core. Does four things exceptionally well:
 
@@ -82,6 +82,20 @@ Global state in evaluation code
 ---
 
 ## Version history
+
+### 1.0.0 — 2026-06-02 — initial release
+
+- Policy audit mode: strict schema validation, 20 TL-S findings, 6 TL-A findings
+- Token validation mode: algorithm allowlist, JWKS key selection, signature verification
+- Time enforcement: exp, nbf, iat, TTL bounds, clock skew, `--at` flag
+- Claim presence enforcement (TL-C001)
+- Inspect mode: parse and display token structure without a policy
+- 41 findings total; all non-suppressible findings enforced unconditionally
+- 12 named security property tests; separate exit code 2 on regression
+- Full test suite: unit, integration, security properties, CLI contract tests
+- Static Linux binary (musl); reproducible builds via VERSION-embedded version string
+- Three vendored dependencies: libyaml, mbedTLS, custom json_writer
+- Hard parse/eval boundary enforced by Makefile include path control
 
 ### 0.1.0 — 2026-05-12 — initial specification
 
