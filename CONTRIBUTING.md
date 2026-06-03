@@ -4,6 +4,21 @@ This document explains how to work on tokenlint. Read it before writing code.
 
 ---
 
+## v1 is feature-frozen
+
+tokenlint v1 is feature-frozen. The 41 findings, three evaluation modes, and CLI
+interface are complete and will not change in v1.x patch releases except to fix
+bugs.
+
+**New findings, new CLI flags, and evaluator changes target v1.1 or v2.**
+
+Reserved finding namespace IDs (e.g. TL-A008, TL-G*, TL-W*) must not be
+repurposed. Additions require updating `finding_registry.def`,
+`docs/finding-registry.md`, the relevant contract doc, and CHANGELOG.md — all in
+the same PR.
+
+---
+
 ## The most important rule
 
 **The parse/eval boundary is inviolable.**
@@ -294,3 +309,22 @@ A feature is done when:
 - [ ] `docs/` updated if behavior changed
 - [ ] CHANGELOG.md updated
 - [ ] CI passes on GCC and Clang
+
+---
+
+## Release checklist
+
+Follow this checklist for every release. Do not skip steps.
+
+- [ ] Update `VERSION` to the new version (e.g. `1.0.1`)
+- [ ] Update `CHANGELOG.md`: move in-progress entry to released with today's date
+- [ ] Update `docs/SPEC.md`: bump `Version:` line to match
+- [ ] Run `make check-coverage` — must exit 0
+- [ ] Run `make test` — must exit 0
+- [ ] Run `make security_props` — must exit 0
+- [ ] Run `make asan` — must exit 0 with no sanitizer errors
+- [ ] Run `make release` and `make static` — both must build clean
+- [ ] Tag the release: `git tag vX.Y.Z && git push origin vX.Y.Z`
+- [ ] Attach `build/release/tokenlint` and `build/static/tokenlint` to the GitHub release
+- [ ] Attach `sha256sums.txt` with checksums for both binaries
+- [ ] After release: bump `VERSION` to `X.Y+1.0-dev` and commit
