@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build and test (ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y libmbedtls-dev libyaml-dev
+
+      - name: Clean
+        run: make clean
+
+      - name: Build (debug)
+        run: make
+
+      - name: Build (release)
+        run: make release
+
+      - name: Build (asan)
+        run: make asan
+
+      - name: Check finding coverage
+        run: make check-coverage
+
+      - name: Run test suite
+        run: make test
+
+      - name: Run security property tests
+        run: |
+          make security_props
+          status=$?
+          if [ $status -eq 2 ]; then
+            echo "::error::Security property tests FAILED (exit 2). Security review required before this PR can be merged."
+            exit 2
+          elif [ $status -ne 0 ]; then
+            echo "::error::Security property tests exited with unexpected status $status."
+            exit $status
+          fi
