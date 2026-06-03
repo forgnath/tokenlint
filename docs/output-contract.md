@@ -35,7 +35,7 @@ Every mode, every run produces this outer shape:
 
   "tool": {
     "name": "tokenlint",
-    "version": "0.1.0"
+    "version": "1.0.0"
   },
 
   "mode": "audit | validate | inspect",
@@ -266,7 +266,7 @@ before the halt are included. The error appears in a top-level `error` field:
 ```json
 {
   "schema_version": "tokenlint.report.v1",
-  "tool": { "name": "tokenlint", "version": "0.1.0" },
+  "tool": { "name": "tokenlint", "version": "1.0.0" },
   "mode": "validate",
   "verdict": "error",
   "exit_code": 3,
