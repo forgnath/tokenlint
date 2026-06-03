@@ -30,34 +30,77 @@ is safe, self-consistent, and honored by real tokens.
 - Small: single static binary, no runtime dependencies on Linux
 - Auditable: minimal dependencies, clean parse/eval boundary, plain C11
 
-## Status
+## v1 feature set
 
-Full specification in `docs/`. Implementation in progress. Layer 1-3 complete. 
+tokenlint v1.0.0 ships 41 findings across five namespaces:
 
-## Quick example
+- **TL-S** (20) — strict schema governance; unknown fields, bad values, contradictory rules
+- **TL-A** (6) — policy-only audit findings; dangerous trust assumptions caught before any token arrives
+- **TL-V** (13) — token validation; algorithm, signature, JWKS key selection, expiration, TTL
+- **TL-C** (1) — claim presence enforcement
+- **TL-I** (1) — input and invocation errors
+
+Three evaluation modes: `audit`, `validate`, `inspect`. JSON output by default. Fully deterministic.
+
+## Installation
 
 ```bash
-# Audit a policy for dangerous assumptions
+git clone https://github.com/forgnath/tokenlint
+cd tokenlint
+make release
+cp build/release/tokenlint /usr/local/bin/
+```
+
+For a fully static binary (Linux, requires musl-gcc):
+
+```bash
+make static
+cp build/static/tokenlint /usr/local/bin/
+```
+
+Verify:
+
+```bash
+tokenlint --version
+```
+
+## Getting started
+
+Start with the example policy in `docs/example-policy.yaml`. The typical workflow
+is audit first, then validate:
+
+```bash
+# Step 1 — audit your policy for dangerous assumptions
 tokenlint audit --policy payments-api.yaml
 
-# Validate a token against a policy
-cat token.jwt | tokenlint validate --policy payments-api.yaml --jwks keys.json
+# Step 2 — validate a token against the policy
+tokenlint validate \
+  --token token.jwt \
+  --policy payments-api.yaml \
+  --jwks keys.json
 
-# Forensic replay at incident time
+# Step 3 — forensic replay at a fixed point in time
 tokenlint validate \
   --token incident.jwt \
   --policy payments-api.yaml \
-  --jwks keys.json \
+  --jwks keys-at-incident.json \
   --at 2026-03-15T14:32:00Z
 
-# Inspect a token's structure
+# Inspect a token's structure without a policy
 tokenlint inspect --token token.jwt --format text
+```
+
+Output is JSON by default. Pipe to `jq` for filtering:
+
+```bash
+tokenlint validate --token token.jwt --policy payments-api.yaml --jwks keys.json \
+  | jq '.findings[] | select(.status == "active")'
 ```
 
 ## Documentation
 
 - [SPEC.md](docs/SPEC.md) — Master index and design philosophy
-- [finding-registry.md](docs/finding-registry.md) — All v1 findings
+- [finding-registry.md](docs/finding-registry.md) — All 41 v1 findings
 - [schema-contract.md](docs/schema-contract.md) — Policy schema specification
 - [algorithm-contract.md](docs/algorithm-contract.md) — Algorithm handling
 - [jwks-contract.md](docs/jwks-contract.md) — JWKS loading and key selection
@@ -71,4 +114,4 @@ tokenlint inspect --token token.jwt --format text
 
 ## License
 
-TBD
+[Apache 2.0](LICENSE)
