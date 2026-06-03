@@ -244,7 +244,7 @@ Valid for all subcommands:
 | `--verbose` | Include info/skipped findings. Boolean, no value. |
 | `--color` | Enable ANSI color in text output. |
 | `--no-color` | Disable ANSI color (default). If both `--color` and `--no-color` provided, `--no-color` wins. |
-| `--version` | Print `tokenlint 0.1.0`; exit 0. No other flags required. |
+| `--version` | Print `tokenlint 1.0.0`; exit 0. No other flags required. |
 | `--help` | Print help for subcommand or top-level; exit 0. |
 
 ### `--at` format
