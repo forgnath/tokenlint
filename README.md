@@ -1,4 +1,14 @@
-# tokenlint
+#Use-case pitch
+
+Ever audited what your service actually enforces about the JWTs it accepts?
+
+Not "does the signature verify" — but the broader trust model. Are you allowing symmetric algorithms in prod? Is your token lifetime actually bounded? Would you catch a misconfigured issuer before a token arrived?
+
+I built a small CLI tool called tokenlint that makes this explicit. You write a YAML file describing what your service believes it enforces — issuers, audiences, algorithms, TTL limits, required claims — and it audits the policy for dangerous assumptions and validates real tokens against it.
+
+Static binary, no runtime deps, JSON output, designed to drop into CI or run forensically with a fixed reference time.
+
+# tokenlint description
 
 A small, portable, air-gapped-first CLI tool for verifying JWT trust boundaries.
 
