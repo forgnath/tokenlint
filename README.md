@@ -1,4 +1,4 @@
-#Use-case pitch
+# Use-case pitch
 
 Ever audited what your service actually enforces about the JWTs it accepts?
 
